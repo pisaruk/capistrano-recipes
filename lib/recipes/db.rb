@@ -69,29 +69,64 @@ Capistrano::Configuration.instance.load do
         db_config = YAML.load(file)
       end
     end
-    
+
+    def self.get_database_access_info(username = nil)
+      environment      = Capistrano::CLI.ui.ask("\nPlease enter the environment (Default: #{fetch(:rails_env, 'dev')})")
+      environment      = fetch(:rails_env, 'dev') if environment.empty?
+
+      db_adapter       = Capistrano::CLI.ui.ask("Please enter database adapter (Options: mysql2, or postgresql. Default postgresql): ")
+      db_adapter       = db_adapter.empty? ? 'postgresql' : db_adapter.gsub(/^mysql$/, 'mysql2')
+
+      default_db_name = "#{fetch(:application, 'database')}_#{environment}"
+      db_name          = Capistrano::CLI.ui.ask("Please enter database name (Default: #{default_db_name}) ")
+      db_name = default_db_name if db_name.empty?
+
+      default_username = username.nil? ? "postgres" : username
+      db_username      = Capistrano::CLI.ui.ask("Please enter database username (Default: #{default_username})")
+      db_username = default_username if db_username.empty?
+
+      db_password      = Capistrano::CLI.password_prompt("Please enter database password: ")
+
+      default_db_host  = roles[:db].servers.first
+      default_db_host = "localhost" if default_db_host.nil?
+      db_host          = Capistrano::CLI.ui.ask("Please enter database host (Default: #{default_db_host}): ")
+      db_host          = db_host.empty? ? default_db_host : db_host
+
+      default_pool = 5
+      db_pool          = Capistrano::CLI.ui.ask("Please enter number of pool connections (Default: #{default_pool}): ")
+      db_pool = default_pool if db_pool.empty?
+
+      {
+        environment.to_s => {
+          "adapter" =>  db_adapter,
+          "encoding" => "utf8",
+          "pool" => db_pool,
+          "database" => db_name,
+          "username" => db_username,
+          "password" => db_password,
+          "host" => db_host.to_s
+        }
+      }
+    end
+
     desc "|DarkRecipes| Create database.yml in shared path with settings for current stage and test env"
-    task :create_yaml do      
-      set(:db_user) { Capistrano::CLI.ui.ask "Enter #{environment} database username:" }
-      set(:db_pass) { Capistrano::CLI.password_prompt "Enter #{environment} database password:" }
-      
-      db_config = ERB.new <<-EOF
-      base: &base
-        adapter: mysql
-        encoding: utf8
-        username: #{db_user}
-        password: #{db_pass}
+    task :create_yaml do
+      run "mkdir -p #{shared_path}/config"
+      if find_servers_for_task(current_task).size == 1
+        db_config = get_database_access_info("#{application}_#{rails_env}_user")
+        put db_config.to_yaml, "#{shared_path}/config/database.yml", :via => :scp
+      else
+        roles.keys.each do |role|
+          db_config = get_database_access_info("#{application}_#{rails_env}_#{role}_user}")
+          put db_config.to_yaml, "#{shared_path}/config/database.yml"
+        end
+      end
+      run "ln -nfs #{shared_path}/config/database.yml #{current_path}/config/database.yml"
+    end
 
-      #{environment}:
-        database: #{application}_#{environment}
-        <<: *base
-
-      test:
-        database: #{application}_test
-        <<: *base
-      EOF
-
-      put db_config.result, "#{shared_path}/config/database.yml"
+    desc "[internal] Symlinks the database.yml file from shared folder into config folder"
+    task :symlink, :except => {:no_release => true} do
+      run "ln -nfs #{shared_path}/config/database.yml #{release_path}/config/database.yml"
     end
   end
     
