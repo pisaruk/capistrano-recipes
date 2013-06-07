@@ -1,7 +1,7 @@
 # Common hooks for all scenarios.
 Capistrano::Configuration.instance.load do
   after 'deploy:setup' do
-    db.create_yml
+    db.create_yaml
     app.setup
     bundler.setup if Capistrano::CLI.ui.agree("Do you need to install the bundler gem? [Yn]")
   end
